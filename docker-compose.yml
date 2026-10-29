@@ -1,57 +1,7 @@
 services:
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-${DBUSERNAME:-payments_app}}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${DBPASSWORD:?Set DBPASSWORD}}
-      POSTGRES_DB: ${POSTGRES_DB:-${DBNAME:-cornflakes_db}}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-
-  pgbouncer:
-    image: edoburu/pgbouncer:v1.26.1-p0
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: ${POSTGRES_USER:-${DBUSERNAME:-payments_app}}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-${DBPASSWORD:?Set DBPASSWORD}}
-      DB_NAME: ${POSTGRES_DB:-${DBNAME:-cornflakes_db}}
-      AUTH_TYPE: scram-sha-256
-      POOL_MODE: transaction
-      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-200}
-      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
-      QUERY_WAIT_TIMEOUT: ${PGBOUNCER_QUERY_WAIT_TIMEOUT:-20}
-      SERVER_LOGIN_RETRY: ${PGBOUNCER_SERVER_LOGIN_RETRY:-1}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${PGBOUNCER_PORT:-6432}:5432"
-
-  app:
-    build: .
-    environment:
-      PGBOUNCER_HOST: pgbouncer
-      PGBOUNCER_PORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-${DBUSERNAME:-payments_app}}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-${DBPASSWORD:?Set DBPASSWORD}}
-      POSTGRES_DB: ${POSTGRES_DB:-${DBNAME:-cornflakes_db}}
-      REPLICA_PGBOUNCER_HOST: ${REPLICA_PGBOUNCER_HOST:-}
-      REPLICA_PGBOUNCER_PORT: ${REPLICA_PGBOUNCER_PORT:-6432}
-    depends_on:
-      pgbouncer:
-        condition: service_started
-    restart: unless-stopped
-
-  # NEW: MinIO object storage
-
   minio:
+    # Official minio/minio and minio/mc images were removed from Docker Hub.
+    # Chainguard's image ships both the server and the mc client.
     image: cgr.dev/chainguard/minio:latest
     command: server /data --console-address ":9001"
     environment:
@@ -62,8 +12,143 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    healthcheck:
+      # No curl/wget in this image; mc has a built-in "local" alias
+      test: [ "CMD", "mc", "ready", "local" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  minio-init:
+    image: cgr.dev/chainguard/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" &&
+        mc mb --ignore-existing local/cornflakes-backups
+    restart: "no"
+
+  postgres-primary:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payments_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-a-long-random-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-cornflakes_db}
+    volumes:
+      - primary_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+      - ./Config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payments_app} -d ${POSTGRES_DB:-cornflakes_db}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  postgres-replica:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    user: postgres
+    entrypoint: [ "/usr/local/bin/init-replica.sh" ]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payments_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-a-long-random-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-cornflakes_db}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - replica_data:/var/lib/postgresql/data
+      - ./Config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "5433:5432"
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+
+  pgbouncer:
+    # v1.26.1-p0 does not exist; v1.24.1-p1 is the latest tag with amd64 + arm64
+    image: edoburu/pgbouncer:v1.24.1-p1
+    environment:
+      DB_HOST: postgres-primary
+      DB_PORT: "5432"
+      DB_USER: ${POSTGRES_USER:-payments_app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-a-long-random-secret}
+      DB_NAME: ${POSTGRES_DB:-cornflakes_db}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-200}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
+      QUERY_WAIT_TIMEOUT: ${PGBOUNCER_QUERY_WAIT_TIMEOUT:-20}
+      SERVER_LOGIN_RETRY: ${PGBOUNCER_SERVER_LOGIN_RETRY:-1}
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+
+  pgbouncer-replica:
+    image: edoburu/pgbouncer:v1.24.1-p1
+    environment:
+      DB_HOST: postgres-replica
+      DB_PORT: "5432"
+      DB_USER: ${POSTGRES_USER:-payments_app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-a-long-random-secret}
+      DB_NAME: ${POSTGRES_DB:-cornflakes_db}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-200}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-20}
+      QUERY_WAIT_TIMEOUT: ${PGBOUNCER_QUERY_WAIT_TIMEOUT:-20}
+      SERVER_LOGIN_RETRY: ${PGBOUNCER_SERVER_LOGIN_RETRY:-1}
+    depends_on:
+      postgres-replica:
+        condition: service_started
+    ports:
+      - "${REPLICA_PGBOUNCER_PORT:-6433}:5432"
+
+  app:
+    build: .
+    environment:
+      PGBOUNCER_HOST: pgbouncer
+      PGBOUNCER_PORT: "5432"
+      REPLICA_PGBOUNCER_HOST: pgbouncer-replica
+      REPLICA_PGBOUNCER_PORT: "5432"
+      POSTGRES_PRIMARY_HOST: postgres-primary
+      POSTGRES_REPLICA_HOST: postgres-replica
+      POSTGRES_USER: ${POSTGRES_USER:-payments_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-with-a-long-random-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-cornflakes_db}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BACKUP_BUCKET: cornflakes-backups
+      METRICS_PORT: "8080"
+    depends_on:
+      pgbouncer:
+        condition: service_started
+      pgbouncer-replica:
+        condition: service_started
+    ports:
+      - "8080:8080"
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  primary_data:
+  replica_data:
   minio_data:
