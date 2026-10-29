@@ -1,0 +1,18 @@
+FROM postgres:17
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        pgbackrest \
+        curl \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest /var/spool/pgbackrest && \
+    chown -R postgres:postgres /var/log/pgbackrest /var/lib/pgbackrest /var/spool/pgbackrest && \
+    chmod 750 /var/log/pgbackrest
+
+COPY Config/pgbackrest.conf /etc/pgbackrest/pgbackrest.conf
+RUN chmod 640 /etc/pgbackrest/pgbackrest.conf && chown root:postgres /etc/pgbackrest/pgbackrest.conf
+
+COPY init-replica.sh /usr/local/bin/init-replica.sh
+RUN chmod +x /usr/local/bin/init-replica.sh

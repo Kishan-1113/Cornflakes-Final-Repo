@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	bakupToMinIO()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -26,5 +27,4 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bakupToMinIO()
 }

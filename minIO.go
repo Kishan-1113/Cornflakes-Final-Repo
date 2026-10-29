@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	endpoint        = "127.0.0.1:9000" // Local MinIO API port
-	accessKeyID     = "minioadmin"     // Change to your actual Access Key
-	secretAccessKey = "minioadmin"     // Change to your actual Secret Key
-	useSSL          = false            // Set to false for local non-TLS testing
+	endpoint        = "minio:9000"
+	accessKeyID     = "minioadmin"
+	secretAccessKey = "minioadmin123"
+	useSSL          = false
 	bucketName      = "local-backups"
-	localFilePath   = "./backup.tar.gz" // Path to the local backup target
+	localFilePath   = "any dummy file path as of now"
 	objectName      = "backups/2026-10-29-backup.tar.gz"
 )
 
