@@ -29,7 +29,6 @@ func getGatewayLedgerPath() string {
 	return envOrDefault("GATEWAY_LEDGER_FILE", "gateway_ledger.jsonl")
 }
 
-// RecordGatewayPayment logs an externally confirmed payment from the payment gateway.
 func RecordGatewayPayment(p GatewayPaymentRecord) error {
 	reconcileMu.Lock()
 	defer reconcileMu.Unlock()
@@ -54,7 +53,6 @@ func RecordGatewayPayment(p GatewayPaymentRecord) error {
 	return nil
 }
 
-// ReconcilePaymentsAfterRewind replays any payments confirmed after restoredAt that are missing from the rewound DB.
 func ReconcilePaymentsAfterRewind(ctx context.Context, router *DBRouter, restoredAt time.Time) (int, error) {
 	reconcileMu.Lock()
 	defer reconcileMu.Unlock()
@@ -92,7 +90,6 @@ func ReconcilePaymentsAfterRewind(ctx context.Context, router *DBRouter, restore
 				Status:         record.Status,
 			}
 
-			// Idempotent insert: if payment was wiped by rewind, it gets inserted; if already present, skipped.
 			_, inserted, err := router.CreatePaymentIdempotent(ctx, payment)
 			if err != nil {
 				log.Printf("[RECONCILE] Warning: failed to replay payment %s: %v", record.PaymentID, err)

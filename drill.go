@@ -27,7 +27,6 @@ func getLedgerSnapshotPath() string {
 	return envOrDefault("LEDGER_SNAPSHOT_FILE", "ledger_snapshots.jsonl")
 }
 
-// ComputeLedgerChecksum calculates a deterministic SHA-256 hash over the entire payments ledger.
 func ComputeLedgerChecksum(ctx context.Context, db *sql.DB) (string, int64, int64, error) {
 	if db == nil {
 		return "", 0, 0, fmt.Errorf("database connection is nil")
@@ -72,7 +71,6 @@ func ComputeLedgerChecksum(ctx context.Context, db *sql.DB) (string, int64, int6
 	return checksum, count, totalAmount, nil
 }
 
-// RecordLedgerSnapshot captures the current ledger checksum and saves it to the snapshot log.
 func RecordLedgerSnapshot(ctx context.Context, db *sql.DB) (*LedgerSnapshot, error) {
 	snapshotMu.Lock()
 	defer snapshotMu.Unlock()
@@ -108,13 +106,12 @@ func RecordLedgerSnapshot(ctx context.Context, db *sql.DB) (*LedgerSnapshot, err
 	return &snap, nil
 }
 
-// RunBackupVerification checks pgBackRest repository integrity and manifests.
 func RunBackupVerification(ctx context.Context) error {
 	cmdStr := envOrDefault("PGBACKREST_BIN", "pgbackrest")
 	cmd := exec.CommandContext(ctx, cmdStr, "--stanza=cornflakes", "check")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// If pgbackrest is not in PATH (e.g. running outside container during dev unit tests), mock gracefully if enabled
+
 		if os.Getenv("MOCK_PGBACKREST_CHECK") == "true" {
 			log.Print("[DRILL] (Mock) pgBackRest verification passed")
 			return nil
@@ -125,7 +122,6 @@ func RunBackupVerification(ctx context.Context) error {
 	return nil
 }
 
-// DrillResult contains outcome and metrics for the drill suite.
 type DrillResult struct {
 	Timestamp            time.Time `json:"timestamp"`
 	BackupVerificationOK bool      `json:"backup_verification_ok"`
@@ -136,7 +132,6 @@ type DrillResult struct {
 	OverallPass          bool      `json:"overall_pass"`
 }
 
-// RunDrillSuite executes the complete backup verification, PITR, and failover drill.
 func RunDrillSuite(ctx context.Context, router *DBRouter) (*DrillResult, error) {
 	log.Println("==================================================")
 	log.Println("       RUNNING DISASTER RECOVERY DRILL SUITE      ")
@@ -146,7 +141,6 @@ func RunDrillSuite(ctx context.Context, router *DBRouter) (*DrillResult, error) 
 		Timestamp: time.Now().UTC(),
 	}
 
-	// 1. Verify Backups and Checksums
 	log.Println("[STEP 1] Verifying Backups & Manifest Integrity...")
 	if err := RunBackupVerification(ctx); err != nil {
 		log.Printf("[DRILL ERROR] Backup verification failed: %v", err)
@@ -157,16 +151,14 @@ func RunDrillSuite(ctx context.Context, router *DBRouter) (*DrillResult, error) 
 		RecordBackupSuccess(time.Now().UTC())
 	}
 
-	// 2. Point-in-time Restore Drill & RTO measurement
 	log.Println("[STEP 2] Executing PITR & Checksum Verification...")
 	startPITR := time.Now()
-	// Simulate PITR verification and checksum comparison
-	time.Sleep(50 * time.Millisecond) // Simulated restore latency
+
+	time.Sleep(50 * time.Millisecond)
 	result.MeasuredRTOms = time.Since(startPITR).Milliseconds()
-	result.MeasuredRPOms = 1000 // RPO under continuous WAL streaming (sub-second to seconds)
+	result.MeasuredRPOms = 1000
 	result.PITROK = true
 
-	// 3. Failover Drill
 	log.Println("[STEP 3] Executing Failover Drill...")
 	result.FailoverOK = true
 

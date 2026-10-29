@@ -22,14 +22,12 @@ func getPurgeLedgerPath() string {
 	return envOrDefault("PURGE_LEDGER_FILE", "purge_ledger.jsonl")
 }
 
-// PurgeUser deletes user data from the database and records the event in both the database purge_ledger and an external durable file.
 func PurgeUser(ctx context.Context, router *DBRouter, userID string) error {
 	purgeMu.Lock()
 	defer purgeMu.Unlock()
 
 	now := time.Now().UTC()
 
-	// 1. Delete user transactions and user profile in DB
 	if _, err := router.ExecWrite(ctx, "DELETE FROM payments WHERE user_id = $1", userID); err != nil {
 		return fmt.Errorf("delete payments for purged user %s: %w", userID, err)
 	}
@@ -37,7 +35,6 @@ func PurgeUser(ctx context.Context, router *DBRouter, userID string) error {
 		return fmt.Errorf("delete user record %s: %w", userID, err)
 	}
 
-	// 2. Insert into database purge_ledger table
 	if _, err := router.ExecWrite(ctx,
 		"INSERT INTO purge_ledger (user_id, purged_at) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET purged_at = EXCLUDED.purged_at",
 		userID, now,
@@ -45,7 +42,6 @@ func PurgeUser(ctx context.Context, router *DBRouter, userID string) error {
 		return fmt.Errorf("record in DB purge_ledger: %w", err)
 	}
 
-	// 3. Append to external durable purge ledger file
 	record := PurgeRecord{
 		UserID:   userID,
 		PurgedAt: now,
@@ -68,7 +64,6 @@ func PurgeUser(ctx context.Context, router *DBRouter, userID string) error {
 	return nil
 }
 
-// ReapplyPurgesAfterRestore reads the external durable purge ledger and reapplies all purges that took place after restoredAt.
 func ReapplyPurgesAfterRestore(ctx context.Context, router *DBRouter, restoredAt time.Time) (int, error) {
 	purgeMu.Lock()
 	defer purgeMu.Unlock()
@@ -96,13 +91,16 @@ func ReapplyPurgesAfterRestore(ctx context.Context, router *DBRouter, restoredAt
 		}
 
 		if record.PurgedAt.After(restoredAt) {
-			// Re-apply purge
+
 			_, _ = router.ExecWrite(ctx, "DELETE FROM payments WHERE user_id = $1", record.UserID)
+
 			_, _ = router.ExecWrite(ctx, "DELETE FROM users WHERE id = $1", record.UserID)
+
 			_, _ = router.ExecWrite(ctx,
 				"INSERT INTO purge_ledger (user_id, purged_at) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING",
 				record.UserID, record.PurgedAt,
 			)
+
 			log.Printf("[POST-RESTORE PURGE] Re-applied purge for user %s (purged at %s, restored to %s)",
 				record.UserID, record.PurgedAt.Format(time.RFC3339), restoredAt.Format(time.RFC3339))
 			reappliedCount++

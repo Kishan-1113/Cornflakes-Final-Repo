@@ -31,11 +31,9 @@ func main() {
 		return
 	}
 
-	// If running restore
 	if *restoreFlag != "" {
 		targetTime, err := time.Parse(time.RFC3339, *restoreFlag)
 		if err != nil {
-			// Try alternative format "2006-01-02 15:04:05"
 			targetTime, err = time.Parse("2006-01-02 15:04:05", *restoreFlag)
 			if err != nil {
 				targetTime = time.Now().Add(-1 * time.Hour)
@@ -61,7 +59,6 @@ func main() {
 		return
 	}
 
-	// Normal server daemon mode:
 	if err := EnsureMinIOBucket(ctx); err != nil {
 		log.Printf("MinIO bucket setup note: %v", err)
 	}
@@ -76,7 +73,6 @@ func main() {
 		}
 	}()
 
-	// Start Observability / Metrics HTTP server
 	metricsPort := envOrDefault("METRICS_PORT", "8080")
 	mux := http.NewServeMux()
 	RegisterObservabilityEndpoints(mux, router)

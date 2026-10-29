@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	dbHealthCheckInterval   = 2 * time.Second
-	dbHealthCheckTimeout    = 2 * time.Second
+	dbHealthCheckInterval  = 2 * time.Second
+	dbHealthCheckTimeout   = 2 * time.Second
 	maxConsecutiveFailures = 3
 )
 
@@ -79,28 +79,23 @@ func failover(ctx context.Context, router *DBRouter) error {
 	}
 	start := time.Now()
 
-	// 1. Pause pooler to queue in-flight transactions
 	_ = pausePooler(ctx)
 
-	// 2. Fence old primary to prevent split-brain
 	if err := fenceOldPrimary(ctx); err != nil {
 		_ = resumePooler(ctx)
 		return fmt.Errorf("old primary is not confirmed fenced: %w", err)
 	}
 
-	// 3. Promote replica to become writable primary
 	if err := promoteReplica(ctx); err != nil {
 		_ = resumePooler(ctx)
 		return fmt.Errorf("replica promotion failed: %w", err)
 	}
 
-	// 4. Redirect router pools to newly promoted primary
 	if err := router.redirectToReplica(ctx); err != nil {
 		_ = resumePooler(ctx)
 		return fmt.Errorf("redirect to promoted replica failed: %w", err)
 	}
 
-	// 5. Resume pooler traffic
 	_ = resumePooler(ctx)
 
 	downtimeMs := time.Since(start).Milliseconds()

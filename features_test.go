@@ -19,7 +19,6 @@ func TestPurgeAndPostRestoreReapplication(t *testing.T) {
 	userID := "00000000-0000-0000-0000-000000000001"
 	purgedAt := time.Now().UTC()
 
-	// 1. Manually write a purge record as if PurgeUser occurred
 	f, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		t.Fatalf("create temp purge file: %v", err)
@@ -27,11 +26,8 @@ func TestPurgeAndPostRestoreReapplication(t *testing.T) {
 	_, _ = f.WriteString(`{"user_id":"` + userID + `","purged_at":"` + purgedAt.Format(time.RFC3339) + "\"}\n")
 	_ = f.Close()
 
-	// 2. Simulate restoring to a point in time before the purge occurred (e.g. 1 hour ago)
 	restoredAt := purgedAt.Add(-1 * time.Hour)
 
-	// DB router is unconfigured in this test, so ReapplyPurgesAfterRestore will attempt reapplication
-	// and skip without error because router.current is nil
 	emptyRouter := &DBRouter{}
 	reapplied, err := ReapplyPurgesAfterRestore(ctx, emptyRouter, restoredAt)
 	if err != nil {
@@ -41,7 +37,6 @@ func TestPurgeAndPostRestoreReapplication(t *testing.T) {
 		t.Fatalf("expected 1 reapplied purge, got %d", reapplied)
 	}
 
-	// 3. If restored to a time AFTER the purge, 0 purges should be reapplied
 	restoredAfter := purgedAt.Add(1 * time.Hour)
 	reappliedAfter, err := ReapplyPurgesAfterRestore(ctx, emptyRouter, restoredAfter)
 	if err != nil {
@@ -74,10 +69,9 @@ func TestMoneyReconciliationAndIdempotency(t *testing.T) {
 		t.Fatalf("RecordGatewayPayment error: %v", err)
 	}
 
-	// Verify payment can be parsed from ledger
 	restoredAt := confirmedAt.Add(-10 * time.Minute)
 	emptyRouter := &DBRouter{}
-	// Reconcile with unconfigured DB (should handle gracefully)
+
 	reconciled, err := ReconcilePaymentsAfterRewind(context.Background(), emptyRouter, restoredAt)
 	if err != nil {
 		t.Fatalf("ReconcilePaymentsAfterRewind error: %v", err)
@@ -92,16 +86,14 @@ func TestObservabilityMetricsEndpoint(t *testing.T) {
 	router := &DBRouter{}
 	RegisterObservabilityEndpoints(mux, router)
 
-	// Test /health
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	// Router has no DB configured, so health returns 503 Service Unavailable
+
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/health status = %d, want 503", w.Code)
 	}
 
-	// Test /metrics
 	reqMetrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	wMetrics := httptest.NewRecorder()
 	mux.ServeHTTP(wMetrics, reqMetrics)
@@ -116,7 +108,6 @@ func TestObservabilityMetricsEndpoint(t *testing.T) {
 		t.Fatalf("expected /metrics to include last_drill_timestamp, got: %s", body)
 	}
 
-	// Test /status
 	reqStatus := httptest.NewRequest(http.MethodGet, "/status", nil)
 	wStatus := httptest.NewRecorder()
 	mux.ServeHTTP(wStatus, reqStatus)

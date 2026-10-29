@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS purge_ledger (
     purged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Streaming replication user & slot initialization
+
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'replicator') THEN

@@ -21,8 +21,8 @@ const (
 
 type DBRouter struct {
 	mu           sync.RWMutex
-	current      *sql.DB   // Write pool (Primary)
-	replicaPool  *sql.DB   // Read pool (Replica)
+	current      *sql.DB // Write pool (Primary)
+	replicaPool  *sql.DB // Read pool (Replica)
 	retired      []*sql.DB
 	lagThreshold float64
 }
@@ -148,7 +148,6 @@ func (r *DBRouter) QueryFresh(ctx context.Context, query string, args ...any) (*
 	return db.QueryContext(ctx, query, args...)
 }
 
-// QueryLagAware checks replication lag. If lag <= threshold, queries replica; otherwise queries primary.
 func (r *DBRouter) QueryLagAware(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	r.mu.RLock()
 	replica := r.replicaPool
@@ -169,14 +168,12 @@ func (r *DBRouter) QueryLagAware(ctx context.Context, query string, args ...any)
 	return primary.QueryContext(ctx, query, args...)
 }
 
-// GetReplicationLag measures current replication lag in seconds.
 func (r *DBRouter) GetReplicationLag(ctx context.Context) (float64, error) {
 	r.mu.RLock()
 	replica := r.replicaPool
 	primary := r.current
 	r.mu.RUnlock()
 
-	// 1. Try querying lag from primary via pg_stat_replication
 	if primary != nil {
 		var lagSeconds sql.NullFloat64
 		query := `SELECT EXTRACT(EPOCH FROM (now() - reply_time)) FROM pg_stat_replication LIMIT 1;`
@@ -189,7 +186,6 @@ func (r *DBRouter) GetReplicationLag(ctx context.Context) (float64, error) {
 		}
 	}
 
-	// 2. Try querying lag from replica directly
 	if replica != nil {
 		var lagSeconds sql.NullFloat64
 		query := `SELECT EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()));`
@@ -205,12 +201,10 @@ func (r *DBRouter) GetReplicationLag(ctx context.Context) (float64, error) {
 	return 0.0, fmt.Errorf("unable to determine replication lag")
 }
 
-// ExecQuery executes on current primary pool (backwards-compatible).
 func (r *DBRouter) ExecQuery(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return r.ExecWrite(ctx, query, args...)
 }
 
-// QueryRows executes query on current primary pool (backwards-compatible).
 func (r *DBRouter) QueryRows(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return r.QueryFresh(ctx, query, args...)
 }
@@ -271,7 +265,6 @@ func (r *DBRouter) Close() error {
 	return firstErr
 }
 
-// CreatePaymentIdempotent inserts a payment with duplicate suppression via idempotency_key.
 func (r *DBRouter) CreatePaymentIdempotent(ctx context.Context, p Payment) (string, bool, error) {
 	if r == nil {
 		return "", false, fmt.Errorf("database router is nil")
@@ -296,7 +289,6 @@ func (r *DBRouter) CreatePaymentIdempotent(ctx context.Context, p Payment) (stri
 	).Scan(&id)
 
 	if err == sql.ErrNoRows {
-		// Already applied earlier with same idempotency key - fetch existing ID
 		var existingID string
 		errSelect := db.QueryRowContext(ctx,
 			"SELECT id FROM payments WHERE idempotency_key = $1", p.IdempotencyKey,
@@ -304,7 +296,7 @@ func (r *DBRouter) CreatePaymentIdempotent(ctx context.Context, p Payment) (stri
 		if errSelect != nil {
 			return "", false, fmt.Errorf("fetch existing idempotent payment: %w", errSelect)
 		}
-		return existingID, false, nil // false = not newly inserted
+		return existingID, false, nil
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("insert payment: %w", err)

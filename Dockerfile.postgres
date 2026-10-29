@@ -2,9 +2,9 @@ FROM postgres:17
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        pgbackrest \
-        curl \
-        ca-certificates && \
+    pgbackrest \
+    curl \
+    ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /etc/pgbackrest /var/log/pgbackrest /var/lib/pgbackrest /var/spool/pgbackrest && \
